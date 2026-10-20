@@ -2,7 +2,7 @@
 	Lunar UI Library -- Example script
 
 	Showcases:
-	  - Window / Pages and the search box (top-right corner filters elements by name)
+	  - Window / Pages and the search box (top-right; results popup, click to jump to the element)
 	  - Toggles (with keybind + colorpicker attached), risk toggle
 	  - Sliders (suffixes, decimals, programmatic set, visibility control)
 	  - Dropdowns (single + multi select + dynamic options refresh)

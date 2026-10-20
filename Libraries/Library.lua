@@ -31,7 +31,7 @@
 	--   SaveManager:SetIgnoreSaving({"Flag1","Flag2"}) -- exclude flags from saved configs
 	--   SaveManager:LoadAutoloadConfig() / ThemeManager:LoadAutoloadTheme() -- call AFTER building your menu (this build does not auto-boot)
 	--
-	--   Search: type in the box in the top-right corner of the window to filter every element by name.
+	--   Search: type in the box in the top-right corner; click a result to jump straight to that element.
 ]]
 
 if isfile("menu_plex.font") then
@@ -684,81 +684,197 @@ do
 			return ""
 		end
 		--
-		--// Filters every element of a window by the text inside the search box.
-		--// Matching is case-insensitive; an empty query restores all elements
-		--// to whatever visibility they had before the search started.
-		function Library:ApplySearchFilter(Search, Window)
+		--// Linoria-style search: pulls fresh entries from every registered
+		--// section (title text + page/section names) for scoring & navigation.
+		function Library:BuildSearchEntries()
+			local Entries = {}
+
 			Library.SearchSections = Library.SearchSections or {}
 
-			local Query = tostring(Search or "")
-			Query = Query:gsub("^%s+", ""):gsub("%s+$", "")
-			local Needle = string.lower(Query)
+			for _, Section in next, Library.SearchSections do
+				if typeof(Section) == "table" and typeof(Section.Elements) == "table" and typeof(Section.Page) == "table" then
+					local Content = Section.Elements.SectionContent
 
-			local Snapshot = Library.SearchSnapshot
-
-			--// first non-empty query: remember the base visibility of every element
-			if Needle ~= "" and Snapshot == nil then
-				Snapshot = {}
-
-				for _, Section in next, Library.SearchSections do
-					if
-						typeof(Section) == "table"
-						and (Window == nil or Section.Window == Window)
-						and typeof(Section.Elements) == "table"
-						and Section.Elements.SectionContent
-					then
-						local Content = Section.Elements.SectionContent
-						local Map = {}
-
+					if typeof(Content) == "Instance" then
 						for _, Child in next, Content:GetChildren() do
-							Map[Child] = Child.Visible
-						end
+							local Text = Library:GetElementSearchText(Child)
 
-						Snapshot[Content] = Map
-					end
-				end
+							if Text ~= "" then
+								local Entry = {
+									Text = Text;
+									Type = "Element";
+									TabName = tostring(Section.Page.Name or "");
+									GroupboxName = tostring(Section.Name or "");
+									Keywords = "";
+									Holder = Child;
+									Section = Section;
+									Page = Section.Page;
+								}
 
-				Library.SearchSnapshot = Snapshot
-			end
+								Entry.SearchText = string.lower(Entry.Text)
+									.. "\0" .. string.lower(Entry.Type)
+									.. "\0" .. string.lower(Entry.TabName)
+									.. "\0" .. string.lower(Entry.GroupboxName)
 
-			if Needle == "" then
-				if Snapshot then
-					for Content, Map in next, Snapshot do
-						if typeof(Content) == "Instance" and typeof(Map) == "table" then
-							for Child, WasVisible in next, Map do
-								pcall(function()
-									Child.Visible = WasVisible
-								end)
+								table.insert(Entries, Entry)
 							end
 						end
 					end
 				end
-
-				Library.SearchSnapshot = nil
-				return true
 			end
 
-			for _, Section in next, Library.SearchSections do
-				if
-					typeof(Section) == "table"
-					and (Window == nil or Section.Window == Window)
-					and typeof(Section.Elements) == "table"
-					and Section.Elements.SectionContent
-				then
-					local Content = Section.Elements.SectionContent
+			return Entries
+		end
+		--
+		--// Scores queries exactly like the working Linoria search: a prefix hit
+		--// beats a substring hit, which beats matching every word anywhere.
+		function Library:Search(Query, Entries)
+			if typeof(Query) ~= "string" then
+				return {}
+			end
 
-					for _, Child in next, Content:GetChildren() do
-						local Text = Library:GetElementSearchText(Child)
-						local Match = Text ~= "" and string.find(string.lower(Text), Needle, 1, true) ~= nil
+			Query = string.lower(Query):match("^%s*(.-)%s*$")
 
-						pcall(function()
-							Child.Visible = Match
-						end)
+			if Query == "" then
+				return {}
+			end
+
+			Entries = Entries or Library:BuildSearchEntries()
+
+			local Matches = {}
+
+			for _, Entry in ipairs(Entries) do
+				local Haystack = Entry.SearchText or ""
+				local Score = 0
+
+				if string.sub(Haystack, 1, #Query) == Query then
+					Score = 3
+				elseif string.find(Haystack, Query, 1, true) then
+					Score = 2
+				else
+					local MatchedAll = true
+
+					for Word in string.gmatch(Query, "%S+") do
+						if not string.find(Haystack, Word, 1, true) then
+							MatchedAll = false
+							break
+						end
+					end
+
+					if MatchedAll then
+						Score = 1
+					end
+				end
+
+				if Score > 0 then
+					table.insert(Matches, {Entry = Entry, Score = Score})
+				end
+			end
+
+			table.sort(Matches, function(A, B)
+				if A.Score ~= B.Score then
+					return A.Score > B.Score
+				end
+
+				return string.lower(A.Entry.Text) < string.lower(B.Entry.Text)
+			end)
+
+			local Results = {}
+
+			for _, Match in ipairs(Matches) do
+				table.insert(Results, Match.Entry)
+			end
+
+			return Results
+		end
+		--
+		--// Switches to the entry's page, unhides its section + element and
+		--// flashes an accent outline over it so the match is easy to spot.
+		function Library:NavigateToSearchEntry(Entry)
+			if typeof(Entry) ~= "table" then
+				return
+			end
+
+			if Library.Open == false then
+				Library:SetOpen(true)
+			end
+
+			local Page = Entry.Page
+
+			if typeof(Page) == "table" and not Page.Open and typeof(Page.Turn) == "function" then
+				Page:Turn(true)
+
+				if typeof(Page.Window) == "table" and typeof(Page.Window.Pages) == "table" then
+					for _, Other in pairs(Page.Window.Pages) do
+						if Other.Open and Other ~= Page then
+							Other:Turn(false)
+						end
 					end
 				end
 			end
 
-			return true
+			pcall(function()
+				local Section = Entry.Section
+
+				if typeof(Section) == "table" and typeof(Section.Elements) == "table" then
+					if Section.Elements.SectionHolder then
+						Section.Elements.SectionHolder.Visible = true
+					end
+
+					if Section.Elements.SectionContent then
+						Section.Elements.SectionContent.Visible = true
+					end
+				end
+
+				if Entry.Holder then
+					Entry.Holder.Visible = true
+				end
+			end)
+
+			local Holder = Entry.Holder
+
+			task.spawn(function()
+				game:GetService("RunService").RenderStepped:Wait()
+
+				if typeof(Holder) ~= "Instance" or not Holder.Parent then
+					return
+				end
+
+				local Screen = Holder:FindFirstAncestorOfClass("ScreenGui")
+
+				if not Screen then
+					return
+				end
+
+				local Flash = Instance.new("Frame")
+				Flash.BackgroundTransparency = 1
+				Flash.BorderSizePixel = 0
+				Flash.Position = UDim2.fromOffset(Holder.AbsolutePosition.X, Holder.AbsolutePosition.Y)
+				Flash.Size = UDim2.fromOffset(Holder.AbsoluteSize.X, Holder.AbsoluteSize.Y)
+				Flash.ZIndex = 50
+				Flash.Parent = Screen
+
+				local Stroke = Instance.new("UIStroke")
+				Stroke.Color = Library.Accent
+				Stroke.Thickness = 2
+				Stroke.Transparency = 0
+				Stroke.Parent = Flash
+
+				for Index = 1, 25 do
+					if not Flash.Parent then
+						return
+					end
+
+					local Alpha = Index / 25
+
+					Flash.BackgroundTransparency = Alpha
+					Stroke.Transparency = Alpha
+
+					task.wait(0.03)
+				end
+
+				Flash:Destroy()
+			end)
 		end
 		--
 		function Library:IsMouseOverFrame(Frame)
@@ -1374,7 +1490,7 @@ do
 			DragButton.FontFace = font
 			DragButton.TextSize = 14
 
-			-- // Search box (filters visible elements by name)
+			-- // Search box (Linoria-style: scored results popup, click to jump)
 			Tabs.Size = UDim2.new(1,-128,0,22)
 
 			local SearchOutline = Instance.new('Frame', HolderInline)
@@ -1382,7 +1498,7 @@ do
 			local SearchBox = Instance.new('TextBox', SearchInline)
 			--
 			SearchOutline.Name = "SearchOutline"
-			SearchOutline.Position = UDim2.new(1,0,0,0)
+			SearchOutline.Position = UDim2.new(1,-126,0,0)
 			SearchOutline.Size = UDim2.new(0,126,0,22)
 			SearchOutline.BackgroundColor3 = Color3.new(0.156863, 0.003922, 0.215686)
 			SearchOutline.BorderColor3 = Color3.new(0.0392,0.0392,0.0392)
@@ -1405,16 +1521,173 @@ do
 			SearchBox.TextSize = Library.FontSize
 			SearchBox.TextColor3 = Color3.new(0.5686,0.5686,0.5686)
 			SearchBox.PlaceholderColor3 = Color3.new(0.35,0.35,0.35)
-			SearchBox.PlaceholderText = "search..."
+			SearchBox.PlaceholderText = "Search..."
 			SearchBox.Text = ""
 			SearchBox.TextXAlignment = Enum.TextXAlignment.Left
 			SearchBox.TextWrapped = false
 			SearchBox.ClearTextOnFocus = false
+
+			-- // Results popup (on the ScreenGui so it floats above the menu)
+			local SearchResults = Instance.new('Frame', ScreenGui)
+			local ResultsInline = Instance.new('Frame', SearchResults)
+			local ResultsScroll = Instance.new('ScrollingFrame', ResultsInline)
+			local ResultsPadding = Instance.new('UIPadding', ResultsScroll)
+			local ResultsLayout = Instance.new('UIListLayout', ResultsScroll)
+			--
+			local SearchRowHeight = 20
+			--
+			SearchResults.Name = "SearchResults"
+			SearchResults.BackgroundColor3 = Color3.new(0.156863, 0.003922, 0.215686)
+			SearchResults.BorderColor3 = Color3.new(0.0392,0.0392,0.0392)
+			SearchResults.BorderSizePixel = 1
+			SearchResults.Size = UDim2.new(0,240,0,0)
+			SearchResults.Visible = false
+			SearchResults.ZIndex = 50
+			--
+			ResultsInline.Name = "Inline"
+			ResultsInline.Position = UDim2.new(0,1,0,1)
+			ResultsInline.Size = UDim2.new(1,-2,1,-2)
+			ResultsInline.BackgroundColor3 = Color3.new(0.184314, 0.027451, 0.247059)
+			ResultsInline.BorderSizePixel = 0
+			ResultsInline.BorderColor3 = Color3.new(0,0,0)
+			ResultsInline.ZIndex = 51
+			--
+			ResultsScroll.Name = "Scroll"
+			ResultsScroll.BackgroundTransparency = 1
+			ResultsScroll.BorderSizePixel = 0
+			ResultsScroll.BorderColor3 = Color3.new(0,0,0)
+			ResultsScroll.Size = UDim2.new(1,0,1,0)
+			ResultsScroll.CanvasSize = UDim2.new(0,0,0,0)
+			ResultsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+			ResultsScroll.ScrollBarThickness = 4
+			ResultsScroll.ScrollBarImageColor3 = Library.Accent
+			ResultsScroll.ZIndex = 52
+			--
+			ResultsPadding.PaddingTop = UDim.new(0,2)
+			ResultsPadding.PaddingBottom = UDim.new(0,2)
+			ResultsPadding.PaddingLeft = UDim.new(0,3)
+			ResultsPadding.PaddingRight = UDim.new(0,3)
+			--
+			ResultsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			ResultsLayout.Padding = UDim.new(0,1)
+			--
+			local function HideSearchResults()
+				SearchResults.Visible = false
+			end
+
+			local function UpdateSearchResultsPosition()
+				local AnchorX = SearchOutline.AbsolutePosition.X + SearchOutline.AbsoluteSize.X - SearchResults.AbsoluteSize.X
+				local AnchorY = SearchOutline.AbsolutePosition.Y + SearchOutline.AbsoluteSize.Y + 4
+
+				SearchResults.Position = UDim2.fromOffset(math.max(AnchorX, 4), math.max(AnchorY, 4))
+			end
+
+			local function ShowSearchResults(Entries)
+				for _, Child in next, ResultsScroll:GetChildren() do
+					if Child:IsA("TextButton") then
+						Child:Destroy()
+					end
+				end
+
+				if #Entries == 0 then
+					HideSearchResults()
+					return
+				end
+
+				local VisibleCount = math.min(#Entries, 8)
+
+				for Index = 1, VisibleCount do
+					local Entry = Entries[Index]
+					local Row = Instance.new('TextButton', ResultsScroll)
+					--
+					Row.Name = "Result"
+					Row.Size = UDim2.new(1,-6,0,SearchRowHeight)
+					Row.BackgroundColor3 = Color3.new(0.156863, 0.003922, 0.215686)
+					Row.BackgroundTransparency = 0.3
+					Row.BorderSizePixel = 0
+					Row.BorderColor3 = Color3.new(0,0,0)
+					Row.Text = ""
+					Row.AutoButtonColor = false
+					Row.LayoutOrder = Index
+					Row.ZIndex = 53
+					--
+					local Main = Instance.new('TextLabel', Row)
+					Main.Name = "Title"
+					Main.BackgroundTransparency = 1
+					Main.BorderSizePixel = 0
+					Main.Position = UDim2.new(0,7,0,0)
+					Main.Size = UDim2.new(1,-64,1,0)
+					Main.FontFace = font
+					Main.TextSize = Library.FontSize
+					Main.TextColor3 = Color3.new(0.83,0.83,0.83)
+					Main.TextXAlignment = Enum.TextXAlignment.Left
+					Main.TextWrapped = false
+					Main.ClipsDescendants = true
+					Main.ZIndex = 54
+					Main.Text = Entry.Text
+					--
+					local Where = Instance.new('TextLabel', Row)
+					Where.Name = "Where"
+					Where.BackgroundTransparency = 1
+					Where.BorderSizePixel = 0
+					Where.AnchorPoint = Vector2.new(1,0)
+					Where.Position = UDim2.new(1,-7,0,0)
+					Where.Size = UDim2.new(0,50,1,0)
+					Where.FontFace = font
+					Where.TextSize = Library.FontSize
+					Where.TextColor3 = Color3.fromRGB(145,145,145)
+					Where.TextXAlignment = Enum.TextXAlignment.Right
+					Where.ZIndex = 54
+					Where.Text = Entry.TabName
+					--
+					Row.MouseEnter:Connect(function()
+						Row.BackgroundTransparency = 0
+					end)
+					Row.MouseLeave:Connect(function()
+						Row.BackgroundTransparency = 0.3
+					end)
+					Row.MouseButton1Click:Connect(function()
+						HideSearchResults()
+						Library:NavigateToSearchEntry(Entry)
+					end)
+				end
+
+				SearchResults.Size = UDim2.new(0,240,0, VisibleCount * (SearchRowHeight + 1) + 6)
+				UpdateSearchResultsPosition()
+				SearchResults.Visible = true
+			end
 			--
 			Library:Connection(SearchBox:GetPropertyChangedSignal("Text"), function()
 				pcall(function()
-					Library:ApplySearchFilter(SearchBox.Text, Window)
+					local Query = SearchBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+
+					if Query == "" then
+						HideSearchResults()
+						return
+					end
+
+					ShowSearchResults(Library:Search(Query))
 				end)
+			end)
+			--
+			Library:Connection(game:GetService("UserInputService").InputBegan, function(Input)
+				if Input.UserInputType == Enum.UserInputType.MouseButton1 and SearchResults.Visible then
+					if not Library:IsMouseOverFrame(SearchResults) and not Library:IsMouseOverFrame(SearchOutline) then
+						HideSearchResults()
+					end
+				end
+			end)
+			--
+			Library:Connection(SearchOutline:GetPropertyChangedSignal("AbsolutePosition"), function()
+				if SearchResults.Visible then
+					UpdateSearchResultsPosition()
+				end
+			end)
+			--
+			Library:Connection(Library.Holder:GetPropertyChangedSignal("Visible"), function()
+				if not Library.Holder.Visible then
+					HideSearchResults()
+				end
 			end)
 			
             

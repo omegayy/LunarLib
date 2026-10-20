@@ -20,7 +20,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/omegayy/LunarLib/main
 
 ## Features
 
-- Dark themed window with draggable bar, tab bar and a **search box** (top-right) that live-filters every element by name
+- Dark themed window with draggable bar, tab bar and a **search box** (top-right) with a scored results dropdown — click a result to jump straight to its page and get the element highlighted with an accent flash
 - Pages (`Window:Page`) / sections with left & right columns
 - Elements: Toggle (+ attached Keybind & Colorpicker), Risk toggle, Slider, Dropdown (single & multi select + dynamic refresh), Textbox, Button, Label, standalone Colorpicker
 - Keybind list overlay (toggle in the Config page)
