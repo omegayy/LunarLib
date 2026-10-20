@@ -23,10 +23,13 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/omegayy/LunarLib/main
 - Dark themed window with draggable bar, tab bar and a **search box** (top-right) with a scored results dropdown — click a result to jump straight to its page and get the element highlighted with an accent flash
 - Pages (`Window:Page`) / sections with left & right columns
 - Elements: Toggle (+ attached Keybind & Colorpicker), Risk toggle, Slider, Dropdown (single & multi select + dynamic refresh), Textbox, Button, Label, standalone Colorpicker
+- **Colorpicker popup**: hex/RGB text input (accepts `#FF0000`, `FF0000`, `#RRGGBBAA`, `255,0,0`, `255 0 0`, `rgb(255,0,0)`, `rgba(255,0,0,0.5)`), a **Copy** button (puts `#RRGGBB` on the clipboard + keeps an internal color/alpha buffer) and a **Paste** button (uses a color from the clipboard, falls back to the last copied one) — right-click the swatch for the small Copy/Paste menu
 - Keybind list overlay (toggle in the Config page)
 - Notifications
-- **SaveManager** — Linoria-style config saving with create / overwrite / delete / refresh / autoload
-- **ThemeManager** — accent colorpicker, 10 preset accents, savable themes, theme autoload
+- **SaveManager** — Linoria-style config saving with create / overwrite / delete / refresh + **autoload buttons** ("Set as autoload" writes a JSON pointer file, "Clear autoload" removes it)
+- **ThemeManager** — accent colorpicker, 10 preset accents, savable themes, theme autoload buttons
+- **`Library:Unload()`** — full teardown: disconnects every tracked connection and destroys the menu / keybind-list / notification GUIs (bind it to a Button)
+- **Menu key** — the window toggles on `Library.UIKey` (default `End`); expose it as a rebindable keybind with `UseKey` whose callback writes `Library.UIKey` (see Example.lua), so nothing double-toggles
 
 ## UI API
 
@@ -61,6 +64,13 @@ local Toggle = Section:Toggle({Name = "Toggle", Flag = "MyToggle"})
 Toggle:Keybind({Name = "Key", Flag = "MyKey", Default = Enum.KeyCode.LeftShift, Mode = "Toggle", Callback = function(State) end})
 Toggle:Colorpicker({Name = "Color", Flag = "MyColor", Default = Color3.fromRGB(255, 0, 0), Callback = function(Color3, Alpha) end})
 Section:Colorpicker({Name = "Color", Flag = "MyColor2", Default = Color3.fromRGB(255, 0, 0), Callback = function(Color3, Alpha) end})
+
+-- // rebindable menu key: the window's built-in handler toggles on Library.UIKey,
+-- // this keybind only EDITS that key (UseKey) -> pressing it never double-toggles
+Section:Keybind({Name = "Menu key", Flag = "MenuKey", Default = Library.UIKey, UseKey = true, Callback = function(Key)
+    if Key then Library.UIKey = Key end
+end})
+Section:Button({Name = "Unload", Callback = function() Library:Unload() end})
 ```
 
 ### Programmatic value setting
@@ -84,7 +94,9 @@ SaveManager:LoadAutoloadConfig()                     -- // applies autoload (do 
 SaveManager:Save("name") / :Load("name") / :Delete("name") / :GetConfigList()
 ```
 
-Files live in `<Folder>/Configs/*.cfg`, autoload pointer in `<Folder>/autoload.txt`.
+Files live in `<Folder>/Configs/*.cfg`, the autoload pointer in `<Folder>/autoload.json` as `{ "Config": "name" }` (written by the **Set as autoload** button; a legacy `autoload.txt` is still read as fallback).
+
+`Library.Flags[MyColor]` holds `{Color = Color3, Transparency = alpha}` for colorpickers; the element callback gets `(Color3, Alpha)` directly.
 
 ## ThemeManager
 

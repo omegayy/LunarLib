@@ -211,6 +211,22 @@ end
 -- // CONFIG (SaveManager + ThemeManager)
 ------------------------------------------------------------------
 do
+	-- // Menu key + unload.
+	-- // The window has a built-in InputBegan handler that toggles on Library.UIKey (default End);
+	-- // this keybind only EDITS that key (UseKey), so pressing it never double-toggles.
+	local menu = config:Section({Name = "Menu", Size = 120}) do
+		menu:Keybind({Name = "Menu key", Flag = "MenuKey", Default = Library.UIKey, UseKey = true, Mode = "Toggle", Callback = function(Key)
+			if Key then
+				Library.UIKey = Key
+			end
+		end})
+
+		menu:Button({Name = "Unload", Callback = function()
+			Library:Unload()
+		end})
+	end
+
+	--
 	local configs = config:Section({Name = "Configs", Size = 260}) do
 		SaveManager:BuildConfigSection(configs)
 	end
@@ -226,6 +242,9 @@ end
 ------------------------------------------------------------------
 SaveManager:SetLibrary(Library)
 SaveManager:SetFolder("LunarExample")
+
+-- // manager-UI flags must never end up inside saved configs
+SaveManager:SetIgnoreSaving({"Config_List", "Config_Name", "Theme_List", "Theme_Name", "Theme_Accent"})
 
 ThemeManager:SetLibrary(Library)
 ThemeManager:SetFolder("LunarExample")

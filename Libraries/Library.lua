@@ -23,13 +23,17 @@
 	--   Section:Label({Name = "Some text", Centered = false})
 	--   local Toggle = Section:Toggle(...); Toggle:Keybind({Name = "Key", Flag = "MyKey", Mode = "Toggle", Callback = function(State) end})
 	--   Toggle/Section:Colorpicker({Name = "Color", Flag = "MyColor", Default = Color3.fromRGB(255,0,0), Callback = function(Color3, Alpha) end})
+	--       -- // popup bottom row: hex/rgb text input + Copy/Paste buttons (Copy also puts #RRGGBB on the clipboard); right-click the swatch for the small Copy/Paste menu
 	--
-	--   SaveManager:BuildConfigSection(ConfigSection)  -- // Linoria-style configs: create/overwrite/delete + autoload
-	--   ThemeManager:BuildThemeSection(ThemeSection)   -- // accent colorpicker, presets + savable themes + autoload
+	--   SaveManager:BuildConfigSection(ConfigSection)  -- // Linoria-style configs: create/overwrite/delete + "Set as autoload" (writes <Folder>/autoload.json)
+	--   ThemeManager:BuildThemeSection(ThemeSection)   -- // accent colorpicker, presets + savable themes + autoload buttons
 	--
 	--   SaveManager:SetFolder("LunarSettings") / ThemeManager:SetFolder(...) -- pick where files are stored
 	--   SaveManager:SetIgnoreSaving({"Flag1","Flag2"}) -- exclude flags from saved configs
 	--   SaveManager:LoadAutoloadConfig() / ThemeManager:LoadAutoloadTheme() -- call AFTER building your menu (this build does not auto-boot)
+	--   Library:Unload() -- // destroys every menu GUI + connection this library made (bind it to a Button)
+	--   Menu key: Section:Keybind({Name = "Menu key", Flag = "MenuKey", Default = Library.UIKey, UseKey = true, Callback = function(Key) Library.UIKey = Key end})
+	--       -- // the window itself toggles on Library.UIKey (default End); the keybind above only EDITS that key, so nothing double-toggles
 	--
 	--   Search: type in the box in the top-right corner; click a result to jump straight to that element.
 ]]
@@ -397,6 +401,10 @@ do
 	do
 		function Library:Connection(Signal, Callback)
 			local Con = Signal:Connect(Callback)
+
+			-- // tracked so Library:Unload() can disconnect everything later
+			table.insert(Library.Connections, Con)
+
 			return Con
 		end
 		--  
@@ -644,6 +652,51 @@ do
 				Library.Open = bool;
 				Library.Holder.Visible = bool;
 			end
+		end;
+		--
+		--// Destroys every GUI + disconnects every connection this library made.
+		--// Bind it to a Button to give your script an "Unload" option.
+		function Library:Unload()
+			if Library.Unloading then
+				return false
+			end
+
+			Library.Unloading = true
+
+			for _, Con in ipairs(Library.Connections) do
+				pcall(function()
+					if typeof(Con) == "RBXScriptConnection" then
+						Con:Disconnect()
+					end
+				end)
+			end
+
+			table.clear(Library.Connections)
+
+			pcall(function()
+				Library.Holder:FindFirstAncestorOfClass("ScreenGui"):Destroy()
+			end)
+
+			pcall(function()
+				PlaceHolderUI:Destroy()
+			end)
+
+			pcall(function()
+				NotifiactionSGui:Destroy()
+			end)
+
+			pcall(function()
+				getgenv().Library = nil
+				getgenv().SaveManager = nil
+				getgenv().ThemeManager = nil
+				_G.Library = nil
+				_G.SaveManager = nil
+				_G.ThemeManager = nil
+			end)
+
+			Library.Open = false
+
+			return true
 		end;
 		--
 		function Library:ChangeAccent(Color)
@@ -1012,6 +1065,9 @@ do
 			local UIListLayout = Instance.new('UIListLayout', ModeInline)
 			local Hold = Instance.new('TextButton', ModeInline)
 			local Toggle = Instance.new('TextButton', ModeInline)
+			local HexBox = Instance.new('TextBox', WindowInline)
+			local CopyBtn = Instance.new('TextButton', WindowInline)
+			local PasteBtn = Instance.new('TextButton', WindowInline)
 			--
 			Icon.Name = "Icon"
 			Icon.Position = UDim2.new(1, - (count * 20) - (count * 6),0.5,0)
@@ -1030,7 +1086,7 @@ do
 			--
 			ColorWindow.Name = "ColorWindow"
 			ColorWindow.Position = UDim2.new(1,-2,1,2)
-			ColorWindow.Size = UDim2.new(0,206,0,170)
+			ColorWindow.Size = UDim2.new(0,206,0,200)
 			ColorWindow.BackgroundColor3 = Color3.fromRGB(40, 1, 55)
 			ColorWindow.BorderColor3 = Color3.fromRGB(40, 1, 55)
 			ColorWindow.AnchorPoint = NewVector2(1,0)
@@ -1198,6 +1254,48 @@ do
 			Toggle.TextSize = Library.FontSize
 			Toggle.TextStrokeTransparency = 0
 			Toggle.ZIndex = 100
+			--
+			HexBox.Name = "HexBox"
+			HexBox.Position = UDim2.new(0,8,0,168)
+			HexBox.Size = UDim2.new(0,116,0,18)
+			HexBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+			HexBox.BorderColor3 = Color3.new(0.0392,0.0392,0.0392)
+			HexBox.BorderSizePixel = 1
+			HexBox.FontFace = font
+			HexBox.TextSize = Library.FontSize
+			HexBox.TextColor3 = Color3.new(1,1,1)
+			HexBox.PlaceholderColor3 = Color3.fromRGB(145,145,145)
+			HexBox.PlaceholderText = "#RRGGBB or 255,0,0"
+			HexBox.TextXAlignment = Enum.TextXAlignment.Left
+			HexBox.ClearTextOnFocus = false
+			HexBox.Text = ""
+			HexBox.ZIndex = 100
+			--
+			CopyBtn.Name = "CopyBtn"
+			CopyBtn.Position = UDim2.new(0,128,0,168)
+			CopyBtn.Size = UDim2.new(0,32,0,18)
+			CopyBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+			CopyBtn.BorderColor3 = Color3.new(0.0392,0.0392,0.0392)
+			CopyBtn.BorderSizePixel = 1
+			CopyBtn.AutoButtonColor = false
+			CopyBtn.FontFace = font
+			CopyBtn.TextSize = Library.FontSize
+			CopyBtn.TextColor3 = Color3.new(1,1,1)
+			CopyBtn.Text = "Copy"
+			CopyBtn.ZIndex = 100
+			--
+			PasteBtn.Name = "PasteBtn"
+			PasteBtn.Position = UDim2.new(0,164,0,168)
+			PasteBtn.Size = UDim2.new(0,34,0,18)
+			PasteBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+			PasteBtn.BorderColor3 = Color3.new(0.0392,0.0392,0.0392)
+			PasteBtn.BorderSizePixel = 1
+			PasteBtn.AutoButtonColor = false
+			PasteBtn.FontFace = font
+			PasteBtn.TextSize = Library.FontSize
+			PasteBtn.TextColor3 = Color3.new(1,1,1)
+			PasteBtn.Text = "Paste"
+			PasteBtn.ZIndex = 100
 
 			Library:Connection(Icon.MouseEnter, function()
 				Icon.BorderColor3 = Library.Accent
@@ -1216,6 +1314,7 @@ do
 			local slidingsaturation = false
 			local slidinghue = false
 			local slidingalpha = false
+			local refreshtext -- // assigned below; update()/set() close over this local
 
 			local function update()
 				local real_pos = game:GetService("UserInputService"):GetMouseLocation()
@@ -1253,6 +1352,7 @@ do
 				end
 
 				callback(Color3.fromRGB(hsv.r * 255, hsv.g * 255, hsv.b * 255), alpha)
+				refreshtext()
 			end
 
 			local function set(color, a)
@@ -1271,7 +1371,7 @@ do
 				alpha = a or 1
 				hsv = Color3.fromHSV(hue, sat, val)
 
-				if hsv ~= oldcolor then
+				if hsv ~= oldcolor or alpha ~= oldalpha then -- // also runs on alpha-only changes (config load / paste / hex input)
 					IconInline.BackgroundColor3 = hsv
 					Color.BackgroundColor3 = Color3.fromHSV(hue, 1, 1)
 					Pointer.Position = UDim2.new(math.clamp(1 - sat, 0.005, 0.995), 0, math.clamp(1 - val, 0.005, 0.995), 0)
@@ -1286,12 +1386,124 @@ do
 					end
 
 					callback(Color3.fromRGB(hsv.r * 255, hsv.g * 255, hsv.b * 255), alpha)
+					refreshtext()
 				end
+			end
+
+			-- // hex helpers for the text field in the popup's bottom row
+			local function tohex(Color)
+				return ("#%02X%02X%02X"):format(
+					math.clamp(math.floor(Color.R * 255 + 0.5), 0, 255),
+					math.clamp(math.floor(Color.G * 255 + 0.5), 0, 255),
+					math.clamp(math.floor(Color.B * 255 + 0.5), 0, 255)
+				)
+			end
+
+			function refreshtext()
+				if HexBox:IsFocused() then
+					return
+				end
+
+				HexBox.Text = tohex(hsv)
+			end
+
+			-- // accepts "#FF0000", "FF0000", "#FF000080" (alpha), "255,0,0",
+			-- // "255 0 0", "rgb(255,0,0)", "rgba(255,0,0,0.5)" - returns color, alpha?
+			local function parsecolor(Text)
+				if type(Text) ~= "string" then
+					return nil
+				end
+
+				Text = Text:gsub("^%s+", ""):gsub("%s+$", "")
+				Text = Text:lower():gsub("^rgba?%(", ""):gsub("%)$", "")
+				Text = Text:gsub("^%s+", ""):gsub("%s+$", "")
+
+				local Hex = Text:gsub("^#", "")
+
+				if Hex:match("^%x%x%x%x%x%x%x%x$") then
+					return Color3.fromHex(Hex:sub(1, 6)), tonumber(Hex:sub(7, 8), 16) / 255
+				end
+
+				if Hex:match("^%x%x%x%x%x%x$") then
+					return Color3.fromHex(Hex)
+				end
+
+				local R, G, B, Rest = Text:match("^(%d+)[,%s]+(%d+)[,%s]+(%d+)(.*)$")
+
+				if R then
+					local Extra = Rest:match("%d+%.?%d*")
+					local A = tonumber(Extra)
+
+					if A and A > 1 then
+						A = A / 255
+					end
+
+					return Color3.fromRGB(
+						math.clamp(tonumber(R), 0, 255),
+						math.clamp(tonumber(G), 0, 255),
+						math.clamp(tonumber(B), 0, 255)
+					), A
+				end
+
+				return nil
 			end
 
 			Flags[flag] = set
 
 			set(default, defaultalpha)
+
+			HexBox.FocusLost:Connect(function()
+				local ParsedColor, ParsedAlpha = parsecolor(HexBox.Text)
+
+				if ParsedColor then
+					set(ParsedColor, ParsedAlpha or alpha)
+				end
+
+				refreshtext()
+			end)
+
+			CopyBtn.MouseButton1Click:Connect(function()
+				Library.CopiedColor = hsv
+				Library.CopiedAlpha = alpha
+
+				-- // hex straight to the system clipboard so it can be pasted anywhere
+				if type(setclipboard) == "function" then
+					pcall(setclipboard, tohex(hsv))
+				end
+
+				CopyBtn.Text = "Copied"
+
+				task.delay(0.8, function()
+					CopyBtn.Text = "Copy"
+				end)
+			end)
+
+			PasteBtn.MouseButton1Click:Connect(function()
+				local Clipped
+
+				if type(getclipboard) == "function" then
+					local Ok, Value = pcall(getclipboard)
+
+					if Ok and type(Value) == "string" then
+						Clipped = Value
+					end
+				end
+
+				local ParsedColor, ParsedAlpha
+
+				if Clipped then
+					ParsedColor, ParsedAlpha = parsecolor(Clipped)
+				end
+
+				if ParsedColor then
+					set(ParsedColor, ParsedAlpha or alpha)
+				elseif Library.CopiedColor then
+					-- // fallback: color copied via the Copy button / right-click menu
+					set(Library.CopiedColor, Library.CopiedAlpha or alpha)
+				end
+
+				refreshtext()
+			end)
 
 			Sat.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -4007,14 +4219,27 @@ do
 		end
 		--
 		function SaveManager:GetAutoloadName()
-			local Path = SaveManager.Folder .. "/autoload.txt"
+			local Path = SaveManager.Folder .. "/autoload.json"
 
 			if isfile(Path) then
-				local ok, Name = pcall(function()
-					return (readfile(Path):gsub("%s+", ""))
+				local ok, Data = pcall(function()
+					return HttpService:JSONDecode(readfile(Path))
 				end)
 
-				if ok then
+				if ok and typeof(Data) == "table" and type(Data.Config) == "string" and Data.Config ~= "" then
+					return Data.Config
+				end
+			end
+
+			-- // legacy plain-text pointer from older builds
+			local Legacy = SaveManager.Folder .. "/autoload.txt"
+
+			if isfile(Legacy) then
+				local ok, Name = pcall(function()
+					return (readfile(Legacy):gsub("%s+", ""))
+				end)
+
+				if ok and Name ~= "" then
 					return Name
 				end
 			end
@@ -4022,6 +4247,7 @@ do
 			return nil
 		end
 		--
+		--// Points the autoload at a config by writing <Folder>/autoload.json ({ "Config": "name" }).
 		function SaveManager:SetAutoloadName(UserName)
 			local Name = tostring(UserName or "")
 
@@ -4030,16 +4256,24 @@ do
 			end
 
 			pcall(function()
-				writefile(SaveManager.Folder .. "/autoload.txt", Name)
+				writefile(SaveManager.Folder .. "/autoload.json", HttpService:JSONEncode({Config = Name}))
+			end)
+
+			pcall(function()
+				local Legacy = SaveManager.Folder .. "/autoload.txt"
+
+				if isfile(Legacy) then
+					delfile(Legacy)
+				end
 			end)
 		end
 		--
 		function SaveManager:ClearAutoload()
 			pcall(function()
-				local Path = SaveManager.Folder .. "/autoload.txt"
-
-				if isfile(Path) then
-					delfile(Path)
+				for _, Path in ipairs({SaveManager.Folder .. "/autoload.json", SaveManager.Folder .. "/autoload.txt"}) do
+					if isfile(Path) then
+						delfile(Path)
+					end
 				end
 			end)
 		end
@@ -4129,17 +4363,20 @@ do
 				SaveManager:RefreshList(List)
 			end})
 			--
-			ConfigSection:Toggle({Name = "Autoload selected", Flag = "Config_Autoload", Callback = function(State)
-				if State then
-					local Selected = tostring(Library.Flags.Config_List or SaveManager.Selected or "")
+			ConfigSection:Button({Name = "Set as autoload", Callback = function()
+				local Selected = tostring(Library.Flags.Config_List or SaveManager.Selected or "")
 
-					if Selected ~= "" then
-						SaveManager:SetAutoloadName(Selected)
-						Notice(("Autoload set to [%s]"):format(Selected))
-					end
-				else
-					SaveManager:ClearAutoload()
+				if Selected == "" then
+					return Notice("Select a config first")
 				end
+
+				SaveManager:SetAutoloadName(Selected)
+				Notice(("Autoload set to [%s]"):format(Selected))
+			end})
+			--
+			ConfigSection:Button({Name = "Clear autoload", Callback = function()
+				SaveManager:ClearAutoload()
+				Notice("Autoload cleared")
 			end})
 			--
 			return List
@@ -4405,10 +4642,28 @@ do
 				Notice(("Deleted theme - [%s]"):format(Selected))
 			end})
 			--
-			ThemeSection:Toggle({Name = "Autoload theme", Flag = "Theme_Autoload", Callback = function(State)
+			ThemeSection:Button({Name = "Set as autoload", Callback = function()
 				local Settings = ThemeManager:GetSettings()
-				Settings.Autoload = State
+				local Selected = tostring(Library.Flags.Theme_List or "")
+
+				if Selected ~= "" then
+					Settings.Current = Selected
+				end
+
+				if not Settings.Current and not Settings.Custom then
+					return Notice("Pick a theme or accent first")
+				end
+
+				Settings.Autoload = true
 				ThemeManager:WriteSettings(Settings)
+				Notice("Theme autoload enabled")
+			end})
+			--
+			ThemeSection:Button({Name = "Clear autoload", Callback = function()
+				local Settings = ThemeManager:GetSettings()
+				Settings.Autoload = false
+				ThemeManager:WriteSettings(Settings)
+				Notice("Theme autoload cleared")
 			end})
 		end
 	end
@@ -4469,6 +4724,7 @@ Library.Version = "LunarLib-2026-10-20"
 		ThemeManager:SetFolder("MySettings")
 		ThemeManager:LoadAutoloadTheme()               -- // apply saved accent
 		SaveManager:LoadAutoloadConfig()               -- // apply saved config
+		Library:Unload()                               -- // full teardown (disconnects everything + destroys the menu GUIs)
 ]]
 
 -- // expose everything globally so scripts can use it right away
